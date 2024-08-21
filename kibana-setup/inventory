@@ -1,0 +1,6 @@
+[server2]
+kibana-2
+
+
+[nodes:children]
+server2

@@ -1,0 +1,107 @@
+---
+- name: Playbook to setup kibana
+  hosts: nodes
+  gather_facts: no
+  tasks:
+    - name: install prerequirement
+      yum:
+        name: '*'
+        state: latest
+
+    - name: add hosts file
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          #Hosts
+          172.31.18.96 master-1
+          172.31.23.146 master-2 kibana
+          172.31.22.3 master-3 kibana
+          172.31.16.6 data-1
+          172.31.23.60 data-2
+
+    - name: import GPG-KEY
+      rpm_key:
+        key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: add repo kibana
+      yum_repository:
+        name: kibana-8.x
+        file: kibana
+        description: Kibana repository for 8.x packages
+        baseurl: https://artifacts.elastic.co/packages/8.x/yum
+        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        enabled: true
+        gpgcheck: true
+
+    - name: install kibana
+      yum:
+        name: kibana
+        state: present
+
+    - name: add variable env
+      lineinfile:
+        path: .bashrc
+        line: "export PATH=$PATH:/usr/share/kibana/bin/"
+      notify: Source .bashrc
+
+    - name: backup kibana file and create new
+      command: "{{ item }}"
+      loop:
+        - mv /etc/kibana/kibana.yml /etc/kibana/kibana.old.yml
+        - touch /etc/kibana/kibana.yml
+      ignore_errors: yes
+
+    - name: modify kibana confg file
+      blockinfile:
+        path: /etc/kibana/kibana.yml
+        block: |
+          server.port: 5601
+          server.host: "0.0.0.0"
+          server.publicBaseUrl: "https://kibana:5601/"
+          elasticsearch.hosts: ["https://master-2:9200", "https://master-3:9200", "https://data-1:9200"]
+          elasticsearch.username: "kibana_system"
+          elasticsearch.password: "password"
+          elasticsearch.ssl.certificateAuthorities: [ "/etc/kibana/certs/http_ca.crt" ] 
+      notify: modify kibana
+
+    - name: create folder certs
+      file:
+        path: /etc/kibana/certs
+        state: directory
+        group: kibana
+
+    - name: Download the file from remote to local
+      fetch:
+        src: /etc/elasticsearch/certs/http_ca.crt
+        dest: /home/ec2-user/
+        flat: yes
+
+    - name: copy certificate of ES
+      copy:
+        src: /home/ec2-user/http_ca.crt
+        dest: /etc/kibana/certs
+        mode: '0664'
+        group: kibana
+
+    - name: daemon-reload
+      command: systemctl daemon-reload
+
+        #- name: start and enable kibana service
+        #service:
+        #name: kibana
+        #state: started
+        #enabled: yes
+
+  handlers:
+    - name: Source .bashrc
+      command: source .bashrc
+
+    - name: modify kibana
+      service:
+        name: kibana
+        state: restarted
+        enabled: yes
+
+
+
