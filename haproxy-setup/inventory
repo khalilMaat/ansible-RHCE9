@@ -1,0 +1,7 @@
+[masters]
+master-2
+master-3
+
+[nodes:children]
+masters
+

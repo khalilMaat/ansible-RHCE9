@@ -1,0 +1,79 @@
+---
+- name: Playbook to setup HAProxy
+  hosts: nodes
+  gather_facts: no
+  tasks:
+    - name: add hosts file
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          #Hosts
+          172.31.18.96 master-1
+          172.31.23.146 master-2 kibana
+          172.31.22.3 master-3 kibana
+          172.31.16.6 data-1
+          172.31.23.60 data-2
+
+    - name: install haproxy
+      yum:
+        name: haproxy
+        state: present
+
+    - name: backup haproxy file and create new
+      command: "{{ item }}"
+      loop:
+        - mv /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.old
+        - touch /etc/haproxy/haproxy.cfg
+      ignore_errors: yes
+
+    - name: modify haproxy confg file
+      blockinfile:
+        path: /etc/haproxy/haproxy.cfg
+        block: |
+          global
+            log /dev/log local0 warning
+            chroot /var/lib/haproxy
+            pidfile /var/run/haproxy.pid
+            maxconn 4000
+            user haproxy
+            group haproxy
+            daemon
+            stats socket /var/lib/haproxy/stats
+
+          defaults
+            log global
+            option httplog
+            option dontlognull
+            timeout connect 5000
+            timeout client 50000
+            timeout server 50000
+
+          frontend kube-apiserver
+            bind *:8443 #port of haproxy service
+            mode tcp
+            option tcplog
+            default_backend kube-apiserver
+
+          backend kube-apiserver
+            option httpchk GET /healthz
+            http-check expect status 200
+            mode tcp
+            option ssl-hello-chk
+            balance roundrobin
+
+          server master-2 master-2:5601 check verify none
+          server master-3 master-3:5601 check verify none
+
+      notify: restart haproxy
+
+    - name: start and enable haproxy service
+      service:
+        name: haproxy
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart haproxy
+      service:
+        name: haproxy
+        state: restarted
