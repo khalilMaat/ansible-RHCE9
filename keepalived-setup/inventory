@@ -1,0 +1,10 @@
+[server1]
+master-2
+
+[server2]
+master-3
+
+
+[nodes:children]
+server1
+server2

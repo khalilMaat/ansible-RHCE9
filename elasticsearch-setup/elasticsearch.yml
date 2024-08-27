@@ -1,0 +1,131 @@
+- name: Playbook setup elasticsearch
+  hosts: master-1
+  gather_facts: no
+  tasks:
+    - name: update system
+      yum:
+        name: '*'
+        state: latest
+
+    - name: install requirement
+      yum:
+        name:
+          - java-17-openjdk
+
+    - name: selinux permissive
+      lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: SELINUX=permissive
+
+    - name: Remove swap entry from /etc/fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^\s*([^#\s]\S+\s+\S+\s+swap\s+\S+\s+\S+\s+\S+)'
+        replace: '# \1'
+      notify: update fstab
+
+    - name: swappoff
+      command: swapoff -a
+
+    - name: add key elasticsearch
+      rpm_key:
+        key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: add repo elasticsearch
+      yum_repository:
+        name: elasticsearch
+        file: elasticsearch
+        description: Elasticsearch repository for 8.x packages
+        baseurl: https://artifacts.elastic.co/packages/8.x/yum
+        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        enabled: true
+        gpgcheck: true
+
+    - name: install elasticsearch
+      yum:
+        name: elasticsearch
+        state: present
+
+    - name: set variable env
+      copy:
+        dest: /home/ec2-user/.bashrc 
+        content: |
+          export PATH=$PATH:/usr/share/elasticsearch/bin/
+
+    - name: refresh the bashrc file
+      command: source .bashrc
+
+    - name: allocate to JVM GB
+      copy:
+        dest: /etc/elasticsearch/jvm.options.d/custom.options
+        content: |
+          -Xms1g
+          -Xmx1g
+
+    - name: ulimit
+      shell: ulimit -n 65535
+        
+    - name: make directory for elasticsearhc service
+      file:
+        path: /etc/systemd/system/elasticsearch.service.d
+        state: directory
+
+    - name: create override file LimitMEMLOCK
+      copy:
+        dest: /etc/systemd/system/elasticsearch.service.d/override.conf
+        content: |
+          [Service]
+          LimitMEMLOCK=infinity
+      notify: change elasticsearch
+
+    - name: set vm.max_map_count 
+      copy:
+        dest: /etc/sysctl.conf
+        content: |
+          # Set vm.max_map_count to increase memory map areas
+          vm.max_map_count=262144
+
+    - name: backup confg file
+      copy:
+        src: /etc/elasticsearch/elasticsearch.yml
+        dest: /etc/elasticsearch/elasticsearch.yml.old
+        remote_src: yes
+
+    - name: delete old confg      
+      file:
+        path: /etc/elasticsearch/elasticsearch.yml
+        state: absent
+
+    - name: add new config file elasticsearch
+      blockinfile:
+        path: /etc/elasticsearch/elasticsearch.yml
+        create: yes
+        block: |
+          cluster.name: ES-cluster
+          node.name: master-1
+          node.roles: [ master,data ]
+          network.host: 0.0.0.0
+          http.port: 9200
+          transport.port: 9300
+          discovery.seed_hosts: ["172.31.16.12:9300","172.31.23.146:9300","172.31.16.6:9300"]
+          cluster.initial_master_nodes: ["master-1"]
+
+      notify: change elasticsearch
+
+    - name: start and enable service
+      service:
+        name: elasticsearch
+        state: started
+        enabled: yes
+
+      #- name: join node to the cluster
+
+  handlers:
+    - name: update fstab
+      command: mount -a
+    - name: change elasticsearch
+      service:
+        name: elasticsearch
+        state: restarted

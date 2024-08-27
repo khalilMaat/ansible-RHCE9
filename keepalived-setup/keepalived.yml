@@ -1,0 +1,178 @@
+---
+- name: Playbook setup keeplaived
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: install requirement and update
+      yum:
+        name: '*'
+        state: latest
+
+    - name: install keepalived 
+      yum:
+        name: keepalived
+        state: present
+
+    - name: backup confg file
+      copy:
+        src: /etc/keepalived/keepalived.conf
+        dest: /etc/keepalived/keepalived.conf.old
+        remote_src: yes
+
+    - name: delete old confg
+      file:
+        path: /etc/keepalived/keepalived.conf
+        state: absent
+
+    - name: create script content
+      copy:
+        dest: /etc/keepalived/check_apiserver.sh
+        content: |
+          #!/bin/sh
+          APISERVER_DEST_PORT=5601
+          errorExit() {
+          echo "*** $*" 1>&2
+          exit 1
+          }
+
+          curl -sfk --max-time 2 http://localhost:${APISERVER_DEST_PORT} -o /dev/null || errorExit "Error GET http://localhost:${APISERVER_DEST_PORT}"
+        mode: '0777'
+
+  handlers:
+    - name: restart keepalived
+      service:
+        name: keepalived
+        state: restarted
+
+- name: Playbook create file confg keepalived MASTER
+  hosts: server1
+  gather_facts: no
+  tasks:
+    - name: create confg file keeplaived of MASTER
+      blockinfile:
+        path: /etc/keepalived/keepalived.conf
+        create: true
+        block: |
+          ! /etc/keepalived/keepalived.conf
+          ! Configuration File for keepalived
+
+          global_defs {
+
+          enable_script_security # only the root user can execute
+          router_id LVS_DEVEL
+          vrrp_skip_check_adv_addr
+          vrrp_garp_interval 0
+          vrrp_gna_interval 0
+          script_user root #to make chk_haproxy script run root
+
+          }
+
+          vrrp_script chk_haproxy {
+
+          script "/etc/keepalived/check_apiserver.sh"
+          interval 3
+          weight -2
+          fall 10
+          rise 2
+
+          }
+
+          vrrp_instance haproxy-vip {
+          state MASTER
+          priority 101
+          interface eth0 # Network card
+          virtual_router_id 60
+          advert_int 1 # send heart beat check each 1 second
+
+          authentication {
+          auth_type PASS
+          auth_pass keepalived
+          }
+
+          unicast_src_ip 172.31.23.146 # The IP address of this machine
+          unicast_peer {
+          172.31.22.3  # The IP address of peer machines
+          }
+
+          virtual_ipaddress {
+          10.0.1.192 # The VIP address
+          }
+          track_script {
+          chk_haproxy
+          }
+          }
+
+      notify: restart keepalived
+
+    - name: start end enable
+      service:
+        name: keepalived
+        state: started
+        enabled: yes
+
+
+- name: Playbook create file confg keepalived BACKUP
+  hosts: server2
+  gather_facts: no
+  tasks:
+    - name: create confg file keeplaived of BACKUP
+      blockinfile:
+        path: /etc/keepalived/keepalived.conf
+        create: true
+        block: |
+          ! /etc/keepalived/keepalived.conf
+          ! Configuration File for keepalived
+
+          global_defs {
+
+          enable_script_security # only the root user can execute
+          router_id LVS_DEVEL
+          vrrp_skip_check_adv_addr
+          vrrp_garp_interval 0
+          vrrp_gna_interval 0
+          script_user root #to make chk_haproxy script run root
+
+          }
+
+          vrrp_script chk_haproxy {
+
+          script "/etc/keepalived/check_apiserver.sh"
+          interval 3
+          weight -2
+          fall 10
+          rise 2
+
+          }
+
+          vrrp_instance haproxy-vip {
+          state BACKUP
+          priority 100
+          interface eth0 # Network card
+          virtual_router_id 60
+          advert_int 1 # send heart beat check each 1 second
+
+          authentication {
+          auth_type PASS
+          auth_pass keepalived
+          }
+
+          unicast_src_ip 172.31.22.3 # The IP address of this machine
+          unicast_peer {
+          172.31.23.146 # The IP address of peer machines
+          }
+
+          virtual_ipaddress {
+          10.0.1.192 # The VIP address
+          }
+          track_script {
+          chk_haproxy
+          }
+          }
+      notify: restart keepalived
+
+    - name: start end enable
+      service:
+        name: keepalived
+        state: started
+        enabled: yes
+
