@@ -1,0 +1,29 @@
+---
+- name: Playbook to register and update machines
+  hosts: all
+  gather_facts: yes
+  vars_prompt:
+    - name: username
+      prompt: enter your username 
+      private: false
+    - name: password
+      prompt: enter your password
+      private: true
+
+  tasks:
+    - name: create hosts file
+      template:
+        src: hosts.j2
+        dest: /etc/hosts
+
+    - name: register repository
+      redhat_subscription:
+        username: "{{ username }}"
+        password: "{{ password }}"
+        state: present
+      when: ansible_facts['distribution'] == "RedHat"
+
+    - name: update system
+      yum:
+        name: "*"
+        state: latest
