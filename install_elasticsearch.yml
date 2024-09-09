@@ -1,0 +1,110 @@
+---
+- name: Install All Requirements of elasticsearch service
+  hosts: all
+  gather_facts: no
+  tasks:    
+#---------- Install Packages ----------#
+    - name: install requirement packages.
+      yum:
+        name:
+          - java-17-openjdk
+          - bash-completion
+        state: present
+
+#---------- Disable Swap ----------#
+    - name: Remove swap entry from /etc/fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^(.*\s+swap\s+.*)$'
+        replace: '# \1'
+
+    - name: Ensure no swap is enabled in fstab
+      mount:
+        name: none
+        state: absent
+        fstype: swap
+
+#--------- Configuring system settings --------#
+    - name: update the number of file opened and thread by elasticsearch user
+      blockinfile:
+        path: /etc/security/limits.conf
+        create: no
+        block: |
+          elasticsearch  -  nofile  65535
+          elasticsearch  -  nproc  4096
+
+    - name: create folder elasticsearch.service.d
+      file:
+        path: /etc/systemd/system/elasticsearch.service.d
+        state: directory
+    - name: overide selasticsearch service
+      blockinfile:
+        path: /etc/systemd/system/elasticsearch.service.d/override.conf
+        create: yes
+        block: |
+          [Service]
+          LimitMEMLOCK=infinity
+          LimitNOFILE=65535
+      notify: reload daemon
+#------------------ Configuring Virtual memory ---------#
+    - name: Increase memory map areas.
+      lineinfile:
+        path: /etc/sysctl.conf
+        create: no
+        line: vm.max_map_count=262144
+      notify: increase memory
+
+#----------------- Install Elasticseach ---------------#
+    - name: import GPG key.
+      rpm_key:
+        state: present
+        key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+    - name: add RPM repository
+      blockinfile:
+        path: /etc/yum.repos.d/elasticsearch.repo
+        create: yes
+        block: |
+          [elasticsearch]
+          name=Elasticsearch repository for 8.x packages
+          baseurl=https://artifacts.elastic.co/packages/8.x/yum
+          gpgcheck=1
+          gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+          enabled=0
+          autorefresh=1
+          type=rpm-md
+      
+    - name: install elasticsearch
+      yum:
+        name: elasticsearch
+        enablerepo: elasticsearch
+        state: present
+
+#------------------ Allocate 1G To JVM --------------#
+    - name: Allocate 1G to JVM
+      blockinfile:
+        path: /etc/elasticsearch/jvm.options.d/custom.options
+        create: yes
+        block: |
+          -Xms1g
+          -Xmx1g
+
+
+#----------- Set Env variables --------#
+    - name: Set Env variable
+      lineinfile:
+        path: /home/ec2-user/.bashrc
+        line: export PATH=$PATH:/usr/share/elasticsearch/bin/
+      notify: source bashrc
+
+
+#---------- Handlers -------------#
+  handlers:
+    - name: reload daemon
+      systemd_service:
+        daemon_reload: true
+    - name: increase memory
+      shell: sysctl -p
+    - name: source bashrc
+      shell: source /home/ec2-user/.bashrc
+

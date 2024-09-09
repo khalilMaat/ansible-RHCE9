@@ -1,0 +1,28 @@
+---
+- name: Installation of the requirement in ALL NODES
+  hosts: all
+  gather_facts: yes
+  vars_files:
+    - credentials
+
+  tasks:
+    #----------- Update ----------#
+    - name: update system
+      yum:
+        name: "*"
+        state: latest
+
+    #----------- Register ----------#
+    - name: register the system 
+      community.general.redhat_subscription:
+        state: present
+        username: "{{ username }}"
+        password: "{{ password }}"
+        pool_ids: 2c94e2938b3a4eeb018b907341eb006d
+   
+
+    #------------- Hosts -----------#
+    - name: Set hosts.
+      template:
+        src: hosts.j2
+        dest: /etc/hosts
