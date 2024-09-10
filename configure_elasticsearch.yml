@@ -77,7 +77,20 @@
       - name: Save password
         copy:
           dest: /etc/elasticsearch/password.txt
-          content: "{{ password.stdout }}"
+          content: |
+            {{ password.stdout }}
+
+      #--------- generate token --------#
+      - name: Generate token
+        command: /usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s node
+        register: token
+
+      #---------- Save Token ------------#
+      - name: Save Token in control node
+        local_action: 'copy dest="token.txt" content="{{ token.stdout }}"'
+        become: false
+
+
 
   #----------- Handlers -------------#
     handlers:
@@ -86,4 +99,71 @@
           name: elasticsearch
           daemon_reload: true
           state: restarted
+
+  - name: Join elk-2, elk-3 nodes to the cluster
+    hosts: elk-2,elk-3
+    gather_facts: yes
+    tasks:
+      - name: debug
+        debug:
+          msg: "{{ hostvars['elk-1'].token.stdout }}"
+
+      #-------------------- Reconfigure nodes-----------#
+      - name: Run elasticsearch-reconfigure-node with token
+        shell: echo "y" | sudo /usr/share/elasticsearch/bin/elasticsearch-reconfigure-node --enrollment-token {{ hostvars['elk-1'].token.stdout }}
+        ignore_errors: yes
+
+      #---------------------- Cluster ------------------#
+      - name: Set Cluster name.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          regexp: '^#clutser.name:'
+          insertafter: '^#cluster.name:'
+          line: 'cluster.name: EC-cluster'
+
+      #--------------------- Node ---------------------#
+      - name: Set Node name.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          regexp: '^#node.name'
+          insertafter: '^#node.name'
+          line: "node.name: {{ ansible_facts['hostname'] }}"
+
+      #------------------- Network -------------------#
+      - name: Set Network host.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          regexp: '^#network.host'
+          insertafter: '^#network.host'
+          line: 'network.host: 0.0.0.0'
+
+
+      - name: Set http port.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          regexp: '^#http.port'
+          insertafter: '^#http.port'
+          line: 'http.port: 9200'
+
+      - name: Set Transport port.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          insertafter: '^http.port'
+          line: 'transport.port: 9300'
+
+      #------------- Discovery Hosts --------#
+      - name: Set discovery seed hosts.
+        lineinfile:
+          path: /etc/elasticsearch/elasticsearch.yml
+          regexp: '^discovery.seed_hosts'
+          line: 'discovery.seed_hosts: ["elk-1:9300", "elk-2:9300", "elk-3:9300"]'
+
+      #-------- Enable and Start elasticsearch Service --------#
+      - name: start and enable elasticsearch
+        systemd_service:
+          name: elasticsearch
+          daemon_reload: true
+          state: started
+
+
 
